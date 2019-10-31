@@ -885,6 +885,8 @@ WeakReference<String> wr = new WeakReference<String>(new String("world"));
    
 **持久代:** 
    用于存放静态文件，如今Java类、方法等。持久代对垃圾回收没有显著影响，但是有些应用可能动态生成或者调用一些class，例如Hibernate等，在这种时候需要设置一个比较大的持久代空间来存放这些运行过程中新增的类。持久代大小通过-XX:MaxPermSize=<N>进行设置。
+
+   拓展: [Java8移除永久代](https://www.cnblogs.com/mengchunchen/p/7819670.html)
    
 **什么情况下触发垃圾回收**
    由于对象进行了分代处理，因此垃圾回收区域、时间也不一样。GC有两种类型：Scavenge GC和Full  GC。
@@ -893,8 +895,150 @@ WeakReference<String> wr = new WeakReference<String>(new String("world"));
    一般情况下，当新对象生成，并且在Eden申请空间失败时，就会触发Scavenge  GC，对Eden区域进行GC，清除非存活对象，并且把尚且存活的对象移动到Survivor区。然后整理Survivor的两个区。这种方式的GC是对年轻代的Eden区进行，不会影响到年老代。因为大部分对象都是从Eden区开始的，同时Eden区不会分配的很大，所以Eden区的GC会频繁进行。因而，一般在这里需要使用速度快、效率高的算法，使Eden去能尽快空闲出来。
    
 **Full GC**
-   对整个堆进行整理，包括Young、Tenured和Perm。Full GC因为需要对整个对进行回收，所以比Scavenge  GC要慢，因此应该尽可能减少Full GC的次数。在对JVM调优的过程中，很大一部分工作就是对于FullGC的调节。有如下原因可能导致Full GC：
+   对整个堆进行整理，包括Young、Tenured和Perm。Full GC因为需要对整个堆进行回收，所以比Scavenge  GC要慢，因此应该尽可能减少Full GC的次数。在对JVM调优的过程中，很大一部分工作就是对于FullGC的调节。有如下原因可能导致Full GC：
 * 年老代（Tenured）被写满
 * 持久代（Perm）被写满   
 * System.gc()被显示调用 
 * 上一次GC之后Heap的各域分配策略动态变化
+
+
+## [十五.JVM架构解析](https://mp.weixin.qq.com/s?__biz=MzA4NDc2MDQ1Nw==&mid=2650238479&idx=1&sn=ee9de4da82e1bf91237f6ef9ebbc84f5&chksm=87e18ce9b09605ffe00970c891a7bf4b884658dc309dcf5be5107d8ee6249f70c363d651151e&scene=21#wechat_redirect)
+
+   每个Java开发人员都知道字节码经由JRE（Java运行时环境）执行。但他们或许不知道JRE其实是由Java虚拟机（JVM）实现，JVM分析字节码，解释并执行它。作为开发人员，了解JVM的架构是非常重要的，因为它使我们能够编写出更高效的代码。本文中，我们将深入了解Java中的JVM架构和JVM的各个组件。
+   
+### 1.JVM
+
+   虚拟机是物理机的软件实现。Java的设计理念是WORA（Write Once Run Anywhere，一次编写随处运行）。编译器将Java文件编译为Java .class文件，然后将.class文件输入到JVM中，JVM执行类文件的加载和执行的操作。
+   
+### 2.JVM是如何工作的？
+
+JVM分为三个主要子系统:
+* 类加载器子系统（Class Loader Subsystem）
+* 运行时数据区（Runtime Data Area）
+* 执行引擎（Execution Engine）
+
+
+**1.类加载器子系统**
+
+Java的动态类加载功能由类加载器子系统处理，处理过程包括加载和链接，并在类文件运行时，首次引用类时就开始实例化类文件，而不是在编译时进行。
+
+**1.1 加载**
+
+Boot Strap类加载器，Extension类加载器和Application（类加载器是实现类加载过程的三个类加载器。
+
+(1) Boot Strap类加载器：负责从引导类路径加载类，除了rt.jar，它具有最高优先级；
+
+(2) Extension 类加载器：负责加载ext文件夹（jre \ lib）中的类；
+
+(3) Application类加载器：负责加载应用程序级类路径，环境变量中指定的路径等信息。
+
+上面的类装载器在加载类文件时遵循委托层次算法（Delegation Hierarchy Algorithm）。
+
+**1.2 链接**
+
+(1) 验证（Verify）：字节码验证器将验证生成的字节码是否正确，如果验证失败，将提示验证错误；
+
+(2) 准备（Prepare）：对于所有静态变量，内存将会以默认值进行分配；
+
+(3) 解释（Resolve）：有符号存储器引用都将替换为来自方法区（Method Area）的原始引用。
+
+**1.3 初始化**
+
+这是类加载的最后阶段，所有的静态变量都将被赋予原始值，并且静态区块将被执行。
+
+
+**2.运行时数据区**
+
+运行时数据区可分为5个主要组件：
+
+(1) 方法区（Method Area）：所有的类级数据将存储在这里，包括静态变量。每个JVM只有一个方法区，它是一个共享资源；
+
+(2) 堆区域（Heap Area）：所有对象及其对应的实例变量和数组将存储在这里。每个JVM也只有一个堆区域。由于方法和堆区域共享多个线程的内存，所存储的数据不是线程安全的；
+
+(3) 堆栈区（Stack Area）：对于每个线程，将创建单独的运行时堆栈。对于每个方法调用，将在堆栈存储器中产生一个条目，称为堆栈帧。所有局部变量将在堆栈内存中创建。堆栈区域是线程安全的，因为它不共享资源。堆栈框架分为三个子元素：
+
+局部变量数组（Local Variable Array）：与方法相关，涉及局部变量，并在此存储相应的值
+
+操作数堆栈（Operand stack）：如果需要执行任何中间操作，操作数堆栈将充当运行时工作空间来执行操作
+
+帧数据（Frame Data）：对应于方法的所有符号存储在此处。在任何异常的情况下，捕获的区块信息将被保持在帧数据中；
+
+(4) PC寄存器（PC Registers）：每个线程都有单独的PC寄存器，用于保存当前执行指令的地址。一旦执行指令，PC寄存器将被下一条指令更新；
+
+(5) 本地方法堆栈（Native Method stacks）：本地方法堆栈保存本地方法信息。对于每个线程，将创建一个单独的本地方法堆栈。
+
+
+**3.执行引擎**
+
+分配给运行时数据区的字节码将由执行引擎执行，执行引擎读取字节码并逐个执行。
+
+(1) 解释器：解释器更快地解释字节码，但执行缓慢。解释器的缺点是当一个方法被调用多次时，每次都需要一个新的解释；
+
+(2) JIT编译器：JIT编译器消除了解释器的缺点。执行引擎将在转换字节码时使用解释器的帮助，但是当它发现重复的代码时，将使用JIT编译器，它编译整个字节码并将其更改为本地代码。这个本地代码将直接用于重复的方法调用，这提高了系统的性能。JIT的构成组件为：
+
+中间代码生成器（Intermediate Code Generator）：生成中间代码
+
+代码优化器（Code Optimizer）：负责优化上面生成的中间代码
+
+目标代码生成器（Target Code Generator）：负责生成机器代码或本地代码
+
+分析器（Profiler）：一个特殊组件，负责查找热点，即该方法是否被多次调用；
+
+(3) 垃圾收集器(Garbage Collector)：收集和删除未引用的对象。可以通过调用“System.gc（）”触发垃圾收集，但不能保证执行。JVM的垃圾回收对象是已创建的对象。
+
+Java本机接口（JNI）：JNI将与本机方法库进行交互，并提供执行引擎所需的本机库。
+
+本地方法库（Native Method Libraries）：它是执行引擎所需的本机库的集合。
+
+
+
+## [十六.触发JVM进行Full GC的情况及应对策略](https://mp.weixin.qq.com/s?__biz=MzA4NDc2MDQ1Nw==&mid=2650238507&idx=1&sn=72de9de160382fc928ce8f50121e869b&chksm=87e18ccdb09605dbffcbb3d8b9ac75fead4b12ec52f36f673ba1ce6c040404f965c4f785e653&scene=21#wechat_redirect)
+
+   堆内存划分为 Eden、Survivor 和 Tenured/Old 空间：
+
+   从年轻代空间（包含 Eden 和 Survivor 区域）回收内存被称为 Minor GC，对老年代GC称为Major GC,而Full GC是对整个堆来说的，在近期几个版本号的JDK里默认包含了对永生带即方法区的回收（JDK8中无永生带了）。出现Full GC的时候常常伴随至少一次的Minor GC,但非绝对的。Major GC的速度通常会比Minor GC慢10倍以上。下边看看有那种情况触发JVM进行Full GC及应对策略。
+   
+### 1、System.gc()方法的调用
+   
+   此方法的调用是建议JVM进行Full GC,尽管仅仅是建议而非一定,但非常多情况下它会触发 Full GC,从而添加Full GC的频率,也即添加了间歇性停顿的次数。强烈影响系建议能不使用此方法就别使用，让虚拟机自己去管理它的内存，可通过通过-XX:+ DisableExplicitGC来禁止RMI调用System.gc。
+   
+### 2、老年代代空间不足
+
+   老年代空间仅仅有在新生代对象转入及创建为大对象、大数组时才会出现不足的现象，当运行Full GC后空间仍然不足。则抛出例如以下错误：java.lang.OutOfMemoryError: Java heap space
+   
+   为避免以上两种状况引起的Full GC，调优时应尽量做到让对象在Minor GC阶段被回收、让对象在新生代多存活一段时间及不要创建过大的对象及数组。
+   
+### 3、永生区空间不足
+
+   JVM规范中执行时数据区域中的方法区，在HotSpot虚拟机中又被习惯称为永生代或者永生区，Permanet Generation中存放的为一些class的信息、常量、静态变量等数据，当系统中要载入的类、反射的类和调用的方法较多时，Permanet Generation可能会被占满。在未配置为採用CMS GC的情况下也会执行Full GC。
+    
+   假设经过Full GC仍然回收不了。那么JVM会抛出例如以下错误信息：java.lang.OutOfMemoryError: PermGen space
+   
+   为避免Perm Gen占满造成Full GC现象。可採用的方法为增大Perm Gen空间或转为使用CMS GC。
+   
+### 4、CMS GC时出现promotion failed和concurrent mode failure
+
+   对于採用CMS进行老年代GC的程序而言，尤其要注意GC日志中是否有promotion failed和concurrent mode failure两种状况，当这两种状况出现时可能会触发Full GC。
+   
+   promotion failed是在进行Minor GC时，survivor space放不下、对象仅仅能放入老年代，而此时老年代也放不下造成的。concurrent mode failure是在运行CMS GC的过程中同一时候有对象要放入老年代，而此时老年代空间不足造成的（有时候“空间不足”是CMS GC时当前的浮动垃圾过多导致临时性的空间不足触发Full GC）。
+   
+   对措施为：增大survivor space、老年代空间或调低触发并发GC的比率。但在JDK 5.0+、6.0+的版本号中有可能会因为JDK的bug29导致CMS在remark完成后非常久才触发sweeping动作。对于这样的状况，可通过设置-XX: CMSMaxAbortablePrecleanTime=5（单位为ms）来避免。
+   
+### 5、统计得到的Minor GC晋升到旧生代的平均大小大于老年代的剩余空间
+
+   这是一个较为复杂的触发情况。Hotspot为了避免因为新生代对象晋升到旧生代导致旧生代空间不足的现象，在进行Minor GC时。做了一个推断，假设之 前统计所得到的Minor GC晋升到旧生代的平均大小大于旧生代的剩余空间，那么就直接触发Full GC。
+   
+   比如程序第一次触发Minor GC后。有6MB的对象晋升到旧生代，那么当下一次Minor GC发生时。首先检查旧生代的剩余空间是否大于6MB，假设小于6MB，则运行Full GC。
+   
+   当新生代採用PS GC时，方式稍有不同，PS GC是在Minor GC后也会检查，比如上面的样例中第一次Minor GC后。PS GC会检查此时旧生代的剩余空间是否大于6MB，如小于。则触发对旧生代的回收。
+   
+   除了以上4种状况外，对于使用RMI来进行RPC或管理的Sun JDK应用而言，默认情况下会一小时运行一次Full GC。可通过在启动时通过- java -Dsun.rmi.dgc.client.gcInterval=3600000来设置Full GC运行的间隔时间或通过-XX:+ DisableExplicitGC来禁止RMI调用System.gc。
+   
+### 6、堆中分配非常大的对象
+
+   所谓大对象，是指须要大量连续内存空间的java对象，比如非常长的数组，此种对象会直接进入老年代，而老年代尽管有非常大的剩余空间，可是无法找到足够大的连续空间来分配给当前对象，此种情况就会触发JVM进行Full GC。
+   
+   为了解决问题。CMS垃圾收集器提供了一个可配置的參数，即-XX:+UseCMSCompactAtFullCollection开关參数，用于在“享受”完Full GC服务之后额外免费赠送一个碎片整理的过程，内存整理的过程无法并发的。空间碎片问题没有了，但提顿时间不得不变长了。JVM设计者们还提供了另外一个參数 -XX:CMSFullGCsBeforeCompaction,这个參数用于设置在运行多少次不压缩的Full GC后,跟着来一次带压缩的。
+
+
+
