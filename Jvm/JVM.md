@@ -1206,7 +1206,7 @@ Java本机接口（JNI）：JNI将与本机方法库进行交互，并提供执�
    
    **2.准备**：准备阶段的工作就是为类的静态变量分配内存并设为jvm默认的初值，对于非静态的变量，则不会为它们分配内存。有一点需要注意，这时候，静态变量的初值为jvm默认的初值，而不是我们在程序中设定的初值。jvm默认的初值是这样的：
    
-   * 基本类型（int、long、short、char、byte、boolean、float、double）的默认值为0。
+   * 基本类型（int、long、short、byte、boolean）的默认值为0,(char)为'\u0000',和Java的null并不等同，仅代表Unicode编码中的空字符,(float,double)为0.0。
    * 引用类型的默认值为null。
    * 常量的默认值为我们程序中设定的值，比如我们在程序中定义final static int a = 100，则准备阶段中a的初值就是100。
    
