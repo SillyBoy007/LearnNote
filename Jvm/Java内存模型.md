@@ -257,6 +257,8 @@ class SynchronizedExample {
    
    第3个差异与处理器总线的工作机制密切相关。在计算机中，数据通过总线在处理器和内存之间传递。每次处理器和内存之间的数据传递都是通过一系列步骤来完成的，这一系列步骤称之为总线事务（bus transaction）。总线事务包括读事务（read transaction）和写事务（write transaction）。读事务从内存传送数据到处理器，写事务从处理器传送数据到内存，每个事务会读/写内存中一个或多个物理上连续的字。这里的关键是，总线会同步试图并发使用总线的事务。在一个处理器执行总线事务期间，总线会禁止其它所有的处理器和I/O设备执行内存的读/写。下面让我们通过一个示意图来说明总线的工作机制：
    
+![](./img/总线的工作机制.png)
+   
    如上图所示，假设处理器A，B和C同时向总线发起总线事务，这时总线仲裁（bus arbitration）会对竞争作出裁决，这里我们假设总线在仲裁后判定处理器A在竞争中获胜（总线仲裁会确保所有处理器都能公平的访问内存）。此时处理器A继续它的总线事务，而其它两个处理器则要等待处理器A的总线事务完成后才能开始再次执行内存访问。假设在处理器A执行总线事务期间（不管这个总线事务是读事务还是写事务），处理器D向总线发起了总线事务，此时处理器D的这个请求会被总线禁止。
    
    总线的这些工作机制可以把所有处理器对内存的访问以串行化的方式来执行；在任意时间点，最多只能有一个处理器能访问内存。这个特性确保了单个总线事务之中的内存读/写操作具有原子性。
@@ -265,6 +267,109 @@ class SynchronizedExample {
    
    当单个内存操作不具有原子性，将可能会产生意想不到后果。请看下面示意图：
    
-   
+ ![](./img/内存操作无原子性.png)
+
    
    如上图所示，假设处理器A写一个long型变量，同时处理器B要读这个long型变量。处理器A中64位的写操作被拆分为两个32位的写操作，且这两个32位的写操作被分配到不同的写事务中执行。同时处理器B中64位的读操作被拆分为两个32位的读操作，且这两个32位的读操作被分配到同一个的读事务中执行。当处理器A和B按上图的时序来执行时，处理器B将看到仅仅被处理器A“写了一半“的无效值。
+   
+   
+
+## [四.Java内存模型-volatile](https://mp.weixin.qq.com/s?__biz=MzA4NDc2MDQ1Nw==&mid=2650238633&idx=1&sn=32dc2c72d6e7141f621ba3f4a0fe3da0&chksm=87e18c4fb09605597f1cb3d12890ae382a2b9c7e7e9c05422cb4c1c41ff78a6da98076d110ab&scene=21#wechat_redirect)
+
+### 1.volatile的特性
+
+   当我们声明共享变量为volatile后，对这个变量的读/写将会很特别。理解volatile特性的一个好方法是：把对volatile变量的单个读/写，看成是使用同一个监视器锁对这些单个读/写操作做了同步。下面我们通过具体的示例来说明，请看下面的示例代码：
+   
+```java
+class VolatileFeaturesExample {
+    volatile long vl = 0L;  //使用volatile声明64位的long型变量
+    public void set(long l) {
+        vl = l;   //单个volatile变量的写
+    }
+    public void getAndIncrement () {
+        vl++;    //复合（多个）volatile变量的读/写
+    }
+    public long get() {
+        return vl;   //单个volatile变量的读
+    }
+}
+```
+
+   假设有多个线程分别调用上面程序的三个方法，这个程序在语意上和下面程序等价：
+   
+```java
+class VolatileFeaturesExample {
+    long vl = 0L;               // 64位的long型普通变量
+    public synchronized void set(long l) {     //对单个的普通 变量的写用同一个监视器同步
+        vl = l;
+    }
+    public void getAndIncrement () { //普通方法调用
+        long temp = get();           //调用已同步的读方法
+        temp += 1L;                  //普通写操作
+        set(temp);                   //调用已同步的写方法
+    }
+    public synchronized long get() { 
+    //对单个的普通变量的读用同一个监视器同步
+        return vl;
+    }
+}
+```
+   如上面示例程序所示，对一个volatile变量的单个读/写操作，与对一个普通变量的读/写操作使用同一个监视器锁来同步，它们之间的执行效果相同。
+   
+   监视器锁的happens-before规则保证释放监视器和获取监视器的两个线程之间的内存可见性，这意味着对一个volatile变量的读，总是能看到（任意线程）对这个volatile变量最后的写入。
+   
+   监视器锁的语义决定了临界区代码的执行具有原子性。这意味着即使是64位的long型和double型变量，只要它是volatile变量，对该变量的读写就将具有原子性。如果是多个volatile操作或类似于volatile++这种复合操作，这些操作整体上不具有原子性。
+   
+   简而言之，volatile变量自身具有下列特性：
+   
+   * 可见性。对一个volatile变量的读，总是能看到（任意线程）对这个volatile变量最后的写入。
+   * 原子性：对任意单个volatile变量的读/写具有原子性，但类似于volatile++这种复合操作不具有原子性。
+
+
+### 2.volatile写-读建立的happens before关系
+
+   上面讲的是volatile变量自身的特性，对程序员来说，volatile对线程的内存可见性的影响比volatile自身的特性更为重要，也更需要我们去关注。
+   从JSR-133开始，volatile变量的写-读可以实现线程之间的通信。
+   从内存语义的角度来说，volatile与监视器锁有相同的效果：volatile写和监视器的释放有相同的内存语义；volatile读与监视器的获取有相同的内存语义。
+   请看下面使用volatile变量的示例代码：
+```java
+class VolatileExample {
+    int a = 0;
+    volatile boolean flag = false;
+    public void writer() {
+        a = 1;                   //1
+        flag = true;               //2
+    }
+    public void reader() {
+        if (flag) {                //3
+            int i =  a;           //4
+        }
+    }
+}
+```   
+   假设线程A执行writer()方法之后，线程B执行reader()方法。根据happens before规则，这个过程建立的happens before 关系可以分为两类：
+
+* 根据程序次序规则，1 happens before 2; 3 happens before 4。
+* 根据volatile规则，2 happens before 3。
+* 根据happens before 的传递性规则，1 happens before 4。
+
+   上述happens before 关系的图形化表现形式如下：
+   在上图中，每一个箭头链接的两个节点，代表了一个happens before 关系。黑色箭头表示程序顺序规则；橙色箭头表示volatile规则；蓝色箭头表示组合这些规则后提供的happens before保证。
+
+   这里A线程写一个volatile变量后，B线程读同一个volatile变量。A线程在写volatile变量之前所有可见的共享变量，在B线程读同一个volatile变量后，将立即变得对B线程可见。
+   
+### 3.volatile写-读的内存语义
+
+
+
+
+
+
+
+
+
+
+
+
+## 拓展阅读
+1.[Java并发](https://github.com/CyC2018/CS-Notes/blob/master/notes/Java%20%E5%B9%B6%E5%8F%91.md)
