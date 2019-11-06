@@ -408,9 +408,217 @@ class VolatileExample {
 
 
 
+## [五.Java内存模型-锁](https://mp.weixin.qq.com/s?__biz=MzA4NDc2MDQ1Nw==&mid=2650238634&idx=1&sn=41471bb82d9bc8a5431e5fe3b55c1bad&chksm=87e18c4cb096055a708ed2b14e93d18b3fd29366bfd3aaa805bc9853f1e0852bca204a99f484&scene=21#wechat_redirect)
 
+### 1.锁的释放-获取建立的happens before 关系
+   
+   锁是java并发编程中最重要的同步机制。锁除了让临界区互斥执行外，还可以让释放锁的线程向获取同一个锁的线程发送消息。下面是锁释放-获取的示例代码：
+   
+ ```java
+class MonitorExample {
+    int a = 0;
 
+    public synchronized void writer() {  //1
+        a++;                             //2
+    }                                    //3
 
+    public synchronized void reader() {  //4
+        int i = a;                       //5
+    }                                    //6
+}
+
+```
+   
+   假设线程A执行writer()方法，随后线程B执行reader()方法。根据happens before规则，这个过程包含的happens before 关系可以分为两类：
+   
+   * 根据程序次序规则，1 happens before 2, 2 happens before 3; 4 happens before 5, 5 happens before 6。
+   
+   * 根据监视器锁规则，3 happens before 4。
+   
+   * 根据happens before 的传递性，2 happens before 5。
+   
+   上述happens before 关系的图形化表现形式如下：
+
+![](./img/happens-before关系.png)
+
+   在上图中，每一个箭头链接的两个节点，代表了一个happens before 关系。黑色箭头表示程序顺序规则；橙色箭头表示监视器锁规则；蓝色箭头表示组合这些规则后提供的happens before保证。
+
+   上图表示在线程A释放了锁之后，随后线程B获取同一个锁。在上图中，2 happens before 5。因此，线程A在释放锁之前所有可见的共享变量，在线程B获取同一个锁之后，将立刻变得对B线程可见。
+
+### 2.锁释放和获取的内存语义
+
+   当线程释放锁时，JMM会把该线程对应的本地内存中的共享变量刷新到主内存中。以上面的MonitorExample程序为例，A线程释放锁后，共享数据的状态示意图如下：
+   
+![](./img/共享数据状态示意图.png)
+   
+   当线程获取锁时，JMM会把该线程对应的本地内存置为无效。从而使得被监视器保护的临界区代码必须要从主内存中去读取共享变量。下面是锁获取的状态示意图：
+
+![](./img/获取锁数据状态.png)
+
+   对比锁释放-获取的内存语义与volatile写-读的内存语义，可以看出：锁释放与volatile写有相同的内存语义；锁获取与volatile读有相同的内存语义。
+   
+   下面对锁释放和锁获取的内存语义做个总结：
+   * 线程A释放一个锁，实质上是线程A向接下来将要获取这个锁的某个线程发出了（线程A对共享变量所做修改的）消息。
+   * 线程B获取一个锁，实质上是线程B接收了之前某个线程发出的（在释放这个锁之前对共享变量所做修改的）消息。
+   * 线程A释放锁，随后线程B获取这个锁，这个过程实质上是线程A通过主内存向线程B发送消息。   
+    
+### 3.锁内存语义的实现
+   本文将借助ReentrantLock的源代码，来分析锁内存语义的具体实现机制。
+
+   请看下面的示例代码：
+```java
+class ReentrantLockExample {
+int a = 0;
+ReentrantLock lock = new ReentrantLock();
+
+public void writer() {
+    lock.lock();         //获取锁
+    try {
+        a++;
+    } finally {
+        lock.unlock();  //释放锁
+    }
+}
+
+public void reader () {
+    lock.lock();        //获取锁
+    try {
+        int i = a;
+    } finally {
+        lock.unlock();  //释放锁
+    }
+}
+}
+```
+   在ReentrantLock中，调用lock()方法获取锁；调用unlock()方法释放锁。
+
+   ReentrantLock的实现依赖于java同步器框架AbstractQueuedSynchronizer（本文简称之为AQS）。AQS使用一个整型的volatile变量（命名为state）来维护同步状态，马上我们会看到，这个volatile变量是ReentrantLock内存语义实现的关键。
+   
+   ReentrantLock分为公平锁和非公平锁，我们首先分析公平锁。
+   
+   使用公平锁时，加锁方法lock()的方法调用轨迹如下：
+   
+   * ReentrantLock : lock()
+   
+   * FairSync : lock()
+   
+   * AbstractQueuedSynchronizer : acquire(int arg)
+   
+   * ReentrantLock : tryAcquire(int acquires)
+   
+   在第4步真正开始加锁，下面是该方法的源代码：
+
+```
+protected final boolean tryAcquire(int acquires) {
+    final Thread current = Thread.currentThread();
+    int c = getState();   //获取锁的开始，首先读volatile变量state
+    if (c == 0) {
+        if (isFirst(current) &&
+            compareAndSetState(0, acquires)) {
+            setExclusiveOwnerThread(current);
+            return true;
+        }
+    }
+    else if (current == getExclusiveOwnerThread()) {
+        int nextc = c + acquires;
+        if (nextc < 0) 
+            throw new Error("Maximum lock count exceeded");
+        setState(nextc);
+        return true;
+    }
+    return false;
+}
+```  
+从上面源代码中我们可以看出，加锁方法首先读volatile变量state。
+
+在使用公平锁时，解锁方法unlock()的方法调用轨迹如下：
+
+* ReentrantLock : unlock()
+
+* AbstractQueuedSynchronizer : release(int arg)
+
+* Sync : tryRelease(int releases)
+
+在第3步真正开始释放锁，下面是该方法的源代码：
+
+```
+protected final boolean tryRelease(int releases) {
+    int c = getState() - releases;
+    if (Thread.currentThread() != getExclusiveOwnerThread())
+        throw new IllegalMonitorStateException();
+    boolean free = false;
+    if (c == 0) {
+        free = true;
+        setExclusiveOwnerThread(null);
+    }
+    setState(c);           //释放锁的最后，写volatile变量state
+    return free;
+}
+
+```
+
+从上面的源代码我们可以看出，在释放锁的最后写volatile变量state。
+
+公平锁在释放锁的最后写volatile变量state；在获取锁时首先读这个volatile变量。根据volatile的happens-before规则，释放锁的线程在写volatile变量之前可见的共享变量，在获取锁的线程读取同一个volatile变量后将立即变的对获取锁的线程可见。
+
+现在我们分析非公平锁的内存语义的实现。
+
+非公平锁的释放和公平锁完全一样，所以这里仅仅分析非公平锁的获取。
+
+使用非公平锁时，加锁方法lock()的方法调用轨迹如下：
+
+* ReentrantLock : lock()
+
+* NonfairSync : lock()
+
+* AbstractQueuedSynchronizer : compareAndSetState(int expect, int update)
+
+在第3步真正开始加锁，下面是该方法的源代码：
+```
+protected final boolean compareAndSetState(int expect, int update) {
+    return unsafe.compareAndSwapInt(this, stateOffset, expect, update);
+}
+
+```
+   该方法以原子操作的方式更新state变量，本文把java的compareAndSet()方法调用简称为CAS。JDK文档对该方法的说明如下：如果当前状态值等于预期值，则以原子方式将同步状态设置为给定的更新值。此操作具有 volatile 读和写的内存语义。
+ 
+   这里我们分别从编译器和处理器的角度来分析,CAS如何同时具有volatile读和volatile写的内存语义。
+   
+   前文我们提到过，编译器不会对volatile读与volatile读后面的任意内存操作重排序；编译器不会对volatile写与volatile写前面的任意内存操作重排序。组合这两个条件，意味着为了同时实现volatile读和volatile写的内存语义，编译器不能对CAS与CAS前面和后面的任意内存操作重排序。
+   
+   下面我们来分析在常见的intel x86处理器中，CAS是如何同时具有volatile读和volatile写的内存语义的。
+   
+   下面是sun.misc.Unsafe类的compareAndSwapInt()方法的源代码：
+
+```
+public final native boolean compareAndSwapInt(Object o, long offset,int expected, int x);
+```  
+
+   可以看到这是个本地方法调用。这个本地方法在openjdk中依次调用的c++代码为：unsafe.cpp，atomic.cpp和atomicwindowsx86.inline.hpp。这个本地方法的最终实现在openjdk的如下位置：openjdk-7-fcs-src-b147-27jun2011\openjdk\hotspot\src\oscpu\windowsx86\vm\ atomicwindowsx86.inline.hpp（对应于windows操作系统，X86处理器）。
+  
+### 4.concurrent包的实现
+   由于java的CAS同时具有 volatile 读和volatile写的内存语义，因此Java线程之间的通信现在有下面四种方式：
+
+* A线程写volatile变量，随后B线程读这个volatile变量。
+
+* A线程写volatile变量，随后B线程用CAS更新这个volatile变量。
+
+* A线程用CAS更新一个volatile变量，随后B线程用CAS更新这个volatile变量。
+
+* A线程用CAS更新一个volatile变量，随后B线程读这个volatile变量。
+
+   Java的CAS会使用现代处理器上提供的高效机器级别原子指令，这些原子指令以原子方式对内存执行读-改-写操作，这是在多处理器中实现同步的关键（从本质上来说，能够支持原子性读-改-写指令的计算机器，是顺序计算图灵机的异步等价机器，因此任何现代的多处理器都会去支持某种能对内存执行原子性读-改-写操作的原子指令）。同时，volatile变量的读/写和CAS可以实现线程之间的通信。把这些特性整合在一起，就形成了整个concurrent包得以实现的基石。如果我们仔细分析concurrent包的源代码实现，会发现一个通用化的实现模式
+   
+* 首先，声明共享变量为volatile；
+   
+* 然后，使用CAS的原子条件更新来实现线程之间的同步；
+   
+* 同时，配合以volatile的读/写和CAS所具有的volatile读和写的内存语义来实现线程之间的通信。
+
+   AQS，非阻塞数据结构和原子变量类（java.util.concurrent.atomic包中的类），这些concurrent包中的基础类都是使用这种模式来实现的，而concurrent包中的高层类又是依赖于这些基础类来实现的。从整体来看，concurrent包的实现示意图如下：
+
+![](./img/concurrent.png)
+   
 
 
 ## 拓展阅读
