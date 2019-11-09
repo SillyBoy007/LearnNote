@@ -620,7 +620,7 @@ public final native boolean compareAndSwapInt(Object o, long offset,int expected
 ![](./img/concurrent.png)
    
 
-## [Java内存模型-final](https://mp.weixin.qq.com/s?__biz=MzA4NDc2MDQ1Nw==&mid=2650238635&idx=1&sn=7af7a3be6e0cef5da202b784535a61f3&chksm=87e18c4db096055b45d25956e30efc80f3061f2af708a2576e92dac7b423b505e4044bd917a1&scene=21#wechat_redirect)
+## [六.Java内存模型-final](https://mp.weixin.qq.com/s?__biz=MzA4NDc2MDQ1Nw==&mid=2650238635&idx=1&sn=7af7a3be6e0cef5da202b784535a61f3&chksm=87e18c4db096055b45d25956e30efc80f3061f2af708a2576e92dac7b423b505e4044bd917a1&scene=21#wechat_redirect)
 
    与前面介绍的锁和volatile相比较，对final域的读和写更像是普通的变量访问。对于final域，编译器和处理器要遵守两个重排序规则：
    
